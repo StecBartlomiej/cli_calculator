@@ -20,20 +20,21 @@ impl std::fmt::Display for Error {
 }
 */
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum TokenType {
+    #[default]
+    Invalid,
     Number,
     Plus,
     Minus,
     Division,
     Mulitplication,
-    Invalid,
     OpenParentheses,
     EndParentheses,
 }
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Token {
     token_type: TokenType,
     value: Option<f32>,
@@ -63,8 +64,8 @@ impl TokenList {
         self.idx += 1;
     }
 
-    pub fn peek(&self) -> Result<Token> {
-        self.list.get(self.idx).cloned().context("TokenList out of bounds peek!")
+    pub fn peek(&self) -> Option<Token> {
+        self.list.get(self.idx).cloned()
     }
 
     pub fn back(&mut self) {
@@ -128,7 +129,7 @@ pub fn expression(tokens: &mut TokenList) -> Result<f32> {
     let mut left = term(tokens)?;
 
     while !tokens.empty() {
-        let operand = tokens.peek()?;
+        let operand = tokens.peek().context("Expected + or -")?;
         tokens.next();
 
         match operand.token_type {
@@ -145,12 +146,13 @@ fn term(tokens: &mut TokenList) -> Result<f32> {
     let mut left = primary(tokens)?;
 
     while !tokens.empty() {
-        let operand = tokens.peek()?;
+        let operand = tokens.peek().context("Expected * or /")?;
+        tokens.next();
 
         match operand.token_type {
             TokenType::Mulitplication => left *= primary(tokens)?,
             TokenType::Division => left /= primary(tokens)?,
-            _ => break,
+            _ => {tokens.back(); break;},
         }
         tokens.next();
     }
@@ -158,15 +160,13 @@ fn term(tokens: &mut TokenList) -> Result<f32> {
 }
 
 fn primary(tokens: &mut TokenList) -> Result<f32> {
-    let operand = tokens.peek()?;
-
+    let operand = tokens.peek().context("Expected number or (")?;
 
     if operand.token_type == TokenType::OpenParentheses {
         tokens.next();
         let result = expression(tokens)?;
 
-        let end_char = tokens.peek()?;
-        ensure!(end_char.token_type == TokenType::EndParentheses, "Lack of closing Parentheses");
+        ensure!(tokens.peek().unwrap_or(Token::default()).token_type == TokenType::EndParentheses, "Lack of closing Parentheses");
 
         tokens.next();
         return Ok(result);
@@ -179,12 +179,12 @@ fn primary(tokens: &mut TokenList) -> Result<f32> {
 fn number(tokens: &mut TokenList) -> Result<f32> {
     let mut is_negative = false;
 
-    let mut x = tokens.peek()?;
+    let mut x = tokens.peek().context("Out of bounds, expected number")?;
 
     if x.token_type == TokenType::Minus {
         is_negative = true;
         tokens.next();
-        x = tokens.peek()?;
+        x = tokens.peek().context("No number after - symbol")?;
     }
 
     tokens.next();
@@ -197,5 +197,6 @@ fn number(tokens: &mut TokenList) -> Result<f32> {
             false => return Ok(number),
         }
     }
-    bail!("Cannot parse number");
+    bail!("Expected number");
 }
+
