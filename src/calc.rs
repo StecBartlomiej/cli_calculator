@@ -1,3 +1,25 @@
+use anyhow::{Result, bail, ensure, Context};
+
+/*
+#[derive(Debug)]
+pub enum Error {
+    OutOfBound,
+    ParsingError,
+
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Error::OutOfBound => write!(f, "Array out of bounds"),
+            Error::ParsingError=> write!(f, "Parrsing error"),
+        }
+    }
+}
+*/
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TokenType {
     Number,
@@ -6,7 +28,10 @@ pub enum TokenType {
     Division,
     Mulitplication,
     Invalid,
+    OpenParentheses,
+    EndParentheses,
 }
+
 
 #[derive(Debug, Clone, Copy)]
 pub struct Token {
@@ -27,21 +52,22 @@ pub struct TokenList {
 
 }
 
+// Change returns to Result<> with anyhow crate
 #[allow(unused)]
 impl TokenList {
     pub fn new(list: Vec<Token>) -> TokenList {
         TokenList{list, idx: 0}
     }
 
-    pub fn next(&mut self) -> Option<Token> {
-        if self.empty() {
-            return None;
-        }
+    pub fn next(&mut self) {
         self.idx += 1;
-        Some(self.list[self.idx - 1])
     }
 
-    pub fn back_one(&mut self) {
+    pub fn peek(&self) -> Result<Token> {
+        self.list.get(self.idx).cloned().context("TokenList out of bounds peek!")
+    }
+
+    pub fn back(&mut self) {
         assert!(self.idx > 0);
         self.idx -= 1;
     }
@@ -88,6 +114,8 @@ pub fn get_tokens(vec_char: &Vec<char>) -> TokenList {
                 '-' => tokens.push(Token::new(TokenType::Minus, None)),
                 '*' => tokens.push(Token::new(TokenType::Mulitplication, None)),
                 '/' => tokens.push(Token::new(TokenType::Division, None)),
+                '(' => tokens.push(Token::new(TokenType::OpenParentheses, None)),
+                ')' => tokens.push(Token::new(TokenType::EndParentheses, None)),
                 _ => tokens.push(Token::new(TokenType::Invalid, None)),
             };
             idx += 1;
@@ -96,58 +124,78 @@ pub fn get_tokens(vec_char: &Vec<char>) -> TokenList {
     TokenList::new(tokens)
 }
 
-pub fn expression(tokens: &mut TokenList) -> f32 {
-    let mut left = term(tokens);
+pub fn expression(tokens: &mut TokenList) -> Result<f32> {
+    let mut left = term(tokens)?;
 
     while !tokens.empty() {
-        let operand = tokens.next().unwrap().token_type;
+        let operand = tokens.peek()?;
+        tokens.next();
 
-        match operand {
-            TokenType::Plus => left += term(tokens),
-            TokenType::Minus => left -= term(tokens),
+        match operand.token_type {
+            TokenType::Plus => left += term(tokens)?,
+            TokenType::Minus => left -= term(tokens)?,
+            _ => {tokens.back(); break;},
+        }
+    }
+    Ok(left)
+}
+
+
+fn term(tokens: &mut TokenList) -> Result<f32> {
+    let mut left = primary(tokens)?;
+
+    while !tokens.empty() {
+        let operand = tokens.peek()?;
+
+        match operand.token_type {
+            TokenType::Mulitplication => left *= primary(tokens)?,
+            TokenType::Division => left /= primary(tokens)?,
             _ => break,
         }
+        tokens.next();
     }
-    left
+    Ok(left)
 }
 
+fn primary(tokens: &mut TokenList) -> Result<f32> {
+    let operand = tokens.peek()?;
 
-fn term(tokens: &mut TokenList) -> f32 {
-    let mut left = primary(tokens);
 
-    while !tokens.empty() {
-        let operand = tokens.next().unwrap().token_type;
+    if operand.token_type == TokenType::OpenParentheses {
+        tokens.next();
+        let result = expression(tokens)?;
 
-        match operand {
-            TokenType::Mulitplication => left *= primary(tokens),
-            TokenType::Division => left /= primary(tokens),
-            _ => {tokens.back_one(); break},
-        }
+        let end_char = tokens.peek()?;
+        ensure!(end_char.token_type == TokenType::EndParentheses, "Lack of closing Parentheses");
+
+        tokens.next();
+        return Ok(result);
     }
-    left
-}
 
-fn primary(tokens: &mut TokenList) -> f32 {
     number(tokens)
 }
 
 
-fn number(tokens: &mut TokenList) -> f32 {
+fn number(tokens: &mut TokenList) -> Result<f32> {
     let mut is_negative = false;
 
-    let mut x = tokens.next().unwrap();
+    let mut x = tokens.peek()?;
 
     if x.token_type == TokenType::Minus {
         is_negative = true;
-        x = tokens.next().unwrap();
+        tokens.next();
+        x = tokens.peek()?;
     }
+
+    tokens.next();
 
     if x.token_type == TokenType::Number {
         let number = x.value.unwrap();
-        if is_negative {
-            return number * -1f32;
+
+        match is_negative {
+            true => return Ok(number * -1f32),
+            false => return Ok(number),
         }
-        return number;
     }
-    0f32
+    bail!("Cannot parse number");
 }
